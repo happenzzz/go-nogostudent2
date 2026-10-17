@@ -89,7 +89,7 @@
   #tray .slot{--cw:var(--tw);flex:none;display:flex;flex-wrap:nowrap;gap:12px;overflow-x:auto;overflow-y:hidden;
     justify-content:safe center;align-items:center;height:calc(var(--tw)*var(--r) + 22px);padding:6px 14px 14px;
     scrollbar-width:thin;scrollbar-color:#d8c9ad transparent}
-  #tray .card{touch-action:pan-x}
+  #tray .slot{touch-action:pan-x}
   .arrow{width:40px;height:40px;border-radius:50%;border:0;background:#f5eee1;color:#8a7458;font-family:var(--f-display);font-size:24px;line-height:1;cursor:pointer;flex:none}
   .arrow:active{transform:scale(.92)}
   #go .slot,#stop .slot{gap:8px}
@@ -144,7 +144,7 @@
   .card,.ph{width:var(--cw);height:calc(var(--cw)*var(--r));flex:none}
   .card{position:relative;background:var(--card);border-radius:14px;padding:6px 6px 4px;display:flex;flex-direction:column;
     box-shadow:0 2px 0 rgba(0,0,0,.06),0 4px 10px rgba(80,60,30,.10);border:2px solid #efe6d6;
-    cursor:grab;touch-action:none;will-change:transform;transition:box-shadow .2s,border-color .2s}
+    cursor:grab;touch-action:none;-webkit-touch-callout:none;will-change:transform;transition:box-shadow .2s,border-color .2s}
   .card:hover{border-color:#e2cfa9}
   .card .num{position:absolute;top:5px;left:6px;z-index:1;font-family:var(--f-display);font-size:calc(var(--cw)*.1);
     min-width:1.7em;height:1.7em;border-radius:50%;display:grid;place-items:center;background:var(--chip);color:var(--chip-ink)}
@@ -181,6 +181,7 @@
   .hint-list .q{font-size:clamp(15px,1.6vw,19px);background:var(--talk-soft);padding:8px 12px}
   .zoom .sheet{max-width:min(620px,100%)}
   .card .pic img{max-width:100%;max-height:100%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;border-radius:8px}
+  .zbtns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
   .zimg{display:block;max-width:100%;max-height:42vh;object-fit:contain;margin:8px auto;border-radius:14px}
   .zemo{font-family:var(--f-emoji);font-size:clamp(90px,16vh,150px);line-height:1.15;margin:6px 0}
   .znum{font-family:var(--f-display);font-size:20px;color:var(--chip-ink);background:var(--chip);border-radius:999px;padding:4px 14px;display:inline-block;margin-bottom:4px}
@@ -217,9 +218,9 @@
     html,body{overflow:auto;height:auto}
     .app{height:auto;min-height:100%}
     .board{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto;
-      grid-template-areas:"center center" "go stop" "tray tray"}
-    #center .slot.one{flex:none;height:220px}
-    #go,#stop{min-height:300px}
+      grid-template-areas:"go stop" "center center" "tray tray"}
+    #center .slot.one{flex:none;height:200px}
+    #go,#stop{min-height:230px}
     #stop .head{flex-direction:row} #stop .cnt{margin-left:auto;margin-right:0} #stop .lbl{text-align:left}
     .lbl{font-size:18px} .lbl small{font-size:.65em}
     .ghost{font-size:15px}
@@ -325,7 +326,7 @@
     <img class="zimg" alt="" hidden>
     <div class="zcap"></div>
     <p class="zwhy" hidden></p>
-    <button class="btn" type="button" data-close>닫기</button>
+    <div class="zbtns"><button class="btn hint" type="button" id="toCenterBtn">토의판에 올리기</button><button class="btn" type="button" data-close>닫기</button></div>
   </div>
 </div>
 
@@ -533,26 +534,43 @@ function settle(card, target, before, home){
   });
 }
 
-/* ---------- drag ---------- */
+/* ---------- drag ----------
+   · 마우스·펜: 8px 움직이면 바로 카드 들기
+   · 손가락(사례 카드 줄): 위쪽(대각선 포함)으로 끌면 카드 들기, 옆으로 밀면 줄 넘겨 보기(직접 스크롤),
+     넘겨 보다가 위로 끌어 올려도 카드 들기, 0.35초 꾹 누르면 방향과 상관없이 카드 들기
+   · 휴대폰처럼 화면이 스크롤될 때는 화면 위·아래 끝에서 자동으로 스크롤 */
 let drag = null;
-const LIFT = 1.1;
+const LIFT = 1.1, HOLD_MS = 350;
+const traySlot = slotOf('tray');
+let momentum = 0;
+function stopMomentum(){ cancelAnimationFrame(momentum); momentum = 0; }
 function onDown(e){
   audio();
   const card = e.currentTarget;
   if(drag || card.classList.contains('lifted') || (e.pointerType === 'mouse' && e.button !== 0)) return;
   e.preventDefault();
-  drag = { card, id:e.pointerId, sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY, lifted:false, over:null, tilt:0, lastX:e.clientX, raf:0,
-    locked: card.classList.contains('locked') };
+  stopMomentum();
+  const touch = e.pointerType !== 'mouse' && e.pointerType !== 'pen';
+  drag = { card, id:e.pointerId, touch, sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY, lifted:false, over:null, raw:null,
+    tilt:0, lastX:e.clientX, raf:0, locked: card.classList.contains('locked'), inTray: card.parentElement === traySlot,
+    pan:false, hold:0, moved:false };
+  try{ card.setPointerCapture(e.pointerId); }catch(_){}
+  if(touch && !drag.locked){
+    const d = drag;
+    d.hold = setTimeout(() => { if(drag === d && !d.lifted && !d.pan){ if(navigator.vibrate) try{ navigator.vibrate(15); }catch(_){} lift(); } }, HOLD_MS);
+  }
 }
 function lift(){
   const { card } = drag;
+  clearTimeout(drag.hold);
   drag.home = { slot: card.parentElement, next: card.nextSibling };
   const r = card.getBoundingClientRect();
   const fromCenter = card.parentElement === slotOf('center');
   floatCard(card);
   if(fromCenter){ drag.ox = parseFloat(card.style.width) / 2; drag.oy = parseFloat(card.style.height) / 2; }
-  else { drag.ox = drag.sx - r.left; drag.oy = drag.sy - r.top; }
+  else { drag.ox = clamp(drag.sx - r.left, 0, r.width); drag.oy = clamp(drag.sy - r.top, 0, r.height); }
   drag.lifted = true;
+  track();
   render();
 }
 function render(){
@@ -560,31 +578,73 @@ function render(){
   const c = drag.card, vx = drag.x - drag.lastX; drag.lastX = drag.x;
   drag.tilt += (Math.max(-12, Math.min(12, vx * .8)) - drag.tilt) * .25;
   c.style.transform = `translate(${drag.x - drag.ox - parseFloat(c.style.left)}px,${drag.y - drag.oy - parseFloat(c.style.top)}px) rotate(${drag.tilt.toFixed(2)}deg) scale(${LIFT})`;
+  // 화면이 스크롤되는 경우(휴대폰 세로 화면) 위·아래 끝에 가까우면 자동 스크롤
+  const se = document.scrollingElement;
+  if(se && se.scrollHeight > se.clientHeight + 2){
+    const edge = 80, h = window.innerHeight;
+    let v = 0;
+    if(drag.y < edge) v = -Math.ceil((edge - drag.y) / 5);
+    else if(drag.y > h - edge) v = Math.ceil((drag.y - (h - edge)) / 5);
+    if(v){ se.scrollTop += v; track(); }
+  }
   drag.raf = requestAnimationFrame(render);
 }
 function zoneAt(x, y){ const el = document.elementFromPoint(x, y); const z = el && el.closest('.drop'); return z ? z.dataset.zone : null; }
+// 손가락 위치로 판단하고, 칸 밖이면 카드 한가운데 위치로 한 번 더 판단(넉넉하게 받기)
+function track(){
+  let raw = zoneAt(drag.x, drag.y);
+  if(!raw){
+    const c = drag.card, w = parseFloat(c.style.width), h = parseFloat(c.style.height);
+    raw = zoneAt(drag.x - drag.ox + w / 2, drag.y - drag.oy + h / 2);
+  }
+  drag.raw = raw;
+  const z = ACCEPT.includes(raw) ? raw : null;
+  if(z !== drag.over){ if(drag.over) zones[drag.over].classList.remove('over'); if(z) zones[z].classList.add('over'); drag.over = z; }
+}
+function startPan(){
+  drag.pan = true; clearTimeout(drag.hold);
+  drag.pan0 = traySlot.scrollLeft; drag.panX = drag.x; drag.panY = drag.y; drag.vx = 0; drag.t = performance.now();
+}
 addEventListener('pointermove', e => {
   if(!drag || e.pointerId !== drag.id) return;
+  e.preventDefault();
+  const px = drag.x;
   drag.x = e.clientX; drag.y = e.clientY;
   if(!drag.lifted){
     const dx = drag.x - drag.sx, dy = drag.y - drag.sy;
-    if(Math.hypot(dx, dy) < 8) return;
-    if(drag.locked){ drag = null; return; }
-    if(e.pointerType !== 'mouse' && drag.card.parentElement === slotOf('tray') && Math.abs(dx) > Math.abs(dy)){ drag = null; return; }
-    lift();
+    if(drag.pan){
+      // 옆으로 넘겨 보는 중 → 직접 스크롤, 위로 확실히 끌어 올리면 카드 들기
+      traySlot.scrollLeft = drag.pan0 - (drag.x - drag.panX);
+      const now = performance.now(), dt = Math.max(1, now - drag.t);
+      drag.vx = .8 * drag.vx + .2 * ((px - drag.x) / dt); drag.t = now;
+      if(drag.panY - drag.y > 36 && (drag.panY - drag.y) > Math.abs(drag.x - px) * 2){ drag.pan = false; drag.sx = drag.x; drag.sy = drag.y; lift(); }
+      else return;
+    } else {
+      if(Math.hypot(dx, dy) < (drag.touch ? 10 : 6)) return;
+      clearTimeout(drag.hold);
+      if(drag.locked){ releaseCapture(drag); drag = null; return; }
+      // 사례 카드 줄을 손가락으로: 위쪽(약 25° 이상 위로 기운 대각선까지)이면 들기, 아니면 넘겨 보기
+      if(drag.touch && drag.inTray && !(dy < 0 && -dy > Math.abs(dx) * .45)){ startPan(); return; }
+      lift();
+    }
   }
-  drag.raw = zoneAt(drag.x, drag.y);
-  const z = ACCEPT.includes(drag.raw) ? drag.raw : null;
-  if(z !== drag.over){ if(drag.over) zones[drag.over].classList.remove('over'); if(z) zones[z].classList.add('over'); drag.over = z; }
+  track();
 }, { passive:false });
+function releaseCapture(d){ try{ d.card.releasePointerCapture(d.id); }catch(_){} }
+function glide(v){
+  stopMomentum();
+  const step = () => {
+    if(Math.abs(v) < .02) { momentum = 0; return; }
+    traySlot.scrollLeft += v * 16; v *= .94;
+    momentum = requestAnimationFrame(step);
+  };
+  momentum = requestAnimationFrame(step);
+}
 function insertBefore(slot, x, y){
   for(const c of slot.children){ const r = c.getBoundingClientRect(); if(y < r.top || (y <= r.bottom && x < r.left + r.width/2)) return c; }
   return null;
 }
-function onUp(e){
-  if(!drag || e.pointerId !== drag.id) return;
-  const d = drag; drag = null; cancelAnimationFrame(d.raf);
-  if(!d.lifted){ openZoom(d.card); return; }
+function finish(d){
   if(d.over) zones[d.over].classList.remove('over');
   if(DROPS.includes(d.raw)){   // GO·NO-GO 칸에는 바로 놓을 수 없음 → 제자리로, 토의판 깜박
     pulse('center', 'pulse');
@@ -595,17 +655,30 @@ function onUp(e){
   const before = target && target !== 'center' ? insertBefore(slotOf(target), d.x, d.y) : null;
   settle(d.card, target, before, d.home);
 }
-addEventListener('pointerup', onUp);
-addEventListener('pointercancel', e => {
+function onUp(e){
   if(!drag || e.pointerId !== drag.id) return;
-  if(!drag.lifted){ drag = null; return; }
-  onUp(e);
-});
+  const d = drag; drag = null; cancelAnimationFrame(d.raf); clearTimeout(d.hold); releaseCapture(d);
+  if(d.pan){ if(Math.abs(d.vx) > .05) glide(d.vx); return; }
+  if(!d.lifted){ if(e.type === 'pointerup') openZoom(d.card); return; }
+  finish(d);
+}
+addEventListener('pointerup', onUp);
+addEventListener('pointercancel', onUp);
+// 창이 가려지거나 손가락이 화면 밖으로 나가 이벤트가 끊기면 카드를 제자리로
+function abortDrag(){
+  if(!drag) return;
+  const d = drag; drag = null; cancelAnimationFrame(d.raf); clearTimeout(d.hold); releaseCapture(d);
+  if(d.lifted){ if(d.over) zones[d.over].classList.remove('over'); flyInto(d.card, d.home.slot, d.home.next); }
+}
+addEventListener('blur', abortDrag);
+document.addEventListener('visibilitychange', () => { if(document.hidden) abortDrag(); });
+document.addEventListener('contextmenu', e => { if(e.target.closest && e.target.closest('.card')) e.preventDefault(); });
+traySlot.addEventListener('pointerdown', stopMomentum);
 document.querySelectorAll('.arrow').forEach(b => b.addEventListener('click', () => {
-  const sl = slotOf('tray'); sl.scrollBy({ left: +b.dataset.dir * sl.clientWidth * .8, behavior:'smooth' });
+  stopMomentum(); traySlot.scrollBy({ left: +b.dataset.dir * traySlot.clientWidth * .8, behavior:'smooth' });
 }));
-slotOf('tray').addEventListener('wheel', e => {
-  if(Math.abs(e.deltaY) > Math.abs(e.deltaX)){ slotOf('tray').scrollLeft += e.deltaY; e.preventDefault(); }
+traySlot.addEventListener('wheel', e => {
+  if(Math.abs(e.deltaY) > Math.abs(e.deltaX)){ traySlot.scrollLeft += e.deltaY; e.preventDefault(); }
 }, { passive:false });
 
 /* GO / 애매해요 / NO-GO buttons */
@@ -670,8 +743,19 @@ function openZoom(card){
     why.hidden = false; why.className = 'zwhy ' + ANSWERS[id];
     why.textContent = (ANSWERS[id] === 'go' ? 'GO · ' : 'NO-GO · ') + REASONS[id];
   } else why.hidden = true;
+  const tc = $('#toCenterBtn');
+  tc.hidden = card.classList.contains('locked') || card.parentElement === slotOf('center');
+  zoomCard = card;
   openModal(m);
 }
+let zoomCard = null;
+$('#toCenterBtn').addEventListener('click', () => {
+  const card = zoomCard; closeModals(); zoomCard = null;
+  if(!card || !card.isConnected || card.classList.contains('lifted') || drag) return;
+  const home = { slot: card.parentElement, next: card.nextSibling };
+  floatCard(card);
+  settle(card, 'center', null, home);
+});
 let toastT;
 function toast(msg, kind){
   const t = $('#toast'); t.textContent = msg; t.className = 'toast show ' + (kind || '');
