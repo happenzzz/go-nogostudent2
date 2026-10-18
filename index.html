@@ -24,6 +24,7 @@
     --cw:120px; --tw:150px; --r:1.1; --centerW:400px;
   }
   *{box-sizing:border-box}
+  [hidden]{display:none!important}
   html,body{margin:0;height:100%;overflow:hidden}
   body{
     background:var(--bg);
@@ -735,8 +736,9 @@ function openZoom(card){
   const m = $('#zoomModal');
   m.querySelector('.znum').textContent = id + '번 카드';
   const ze = m.querySelector('.zemo'), zi = m.querySelector('.zimg');
-  ze.hidden = !!CARDS[i].img; zi.hidden = !CARDS[i].img;
-  if(CARDS[i].img) zi.src = CARDS[i].img; else ze.textContent = CARDS[i].e;
+  // 지금 누른 카드의 그림 하나만 보이게: 그림 카드면 이모지를 비우고, 이모지 카드면 그림을 비움
+  if(CARDS[i].img){ ze.textContent = ''; ze.hidden = true; zi.src = CARDS[i].img; zi.hidden = false; }
+  else { zi.removeAttribute('src'); zi.hidden = true; ze.textContent = CARDS[i].e; ze.hidden = false; }
   m.querySelector('.zcap').textContent = CARDS[i].t;
   const why = m.querySelector('.zwhy');
   if(TEACHER && card.classList.contains('locked')){
